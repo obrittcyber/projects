@@ -1,6 +1,7 @@
 .venv/
+**/.venv/
 __pycache__/
 *.pyc
 .env
-data/*.jsonl
-propupkeep/data/*.jsonl
+**/.env
+projects/**/propupkeep/data/*.jsonl

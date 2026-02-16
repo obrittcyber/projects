@@ -8,7 +8,21 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ENV_FILE = PROJECT_ROOT / ".env"
+
+# Load project-local .env so each project can keep isolated config.
+load_dotenv(dotenv_path=PROJECT_ENV_FILE, override=False)
+
+
+def _resolve_data_file() -> Path:
+    env_value = os.getenv("DATA_FILE")
+    if env_value:
+        candidate = Path(env_value)
+        if candidate.is_absolute():
+            return candidate
+        return (PROJECT_ROOT / candidate).resolve()
+    return PROJECT_ROOT / "propupkeep/data/activity.jsonl"
 
 
 class Settings(BaseModel):
@@ -31,11 +45,7 @@ class Settings(BaseModel):
 
     max_upload_mb: int = Field(default_factory=lambda: int(os.getenv("MAX_UPLOAD_MB", "5")))
     max_input_chars: int = Field(default_factory=lambda: int(os.getenv("MAX_INPUT_CHARS", "3000")))
-    data_file: Path = Field(
-        default_factory=lambda: Path(
-            os.getenv("DATA_FILE", "propupkeep/data/activity.jsonl")
-        )
-    )
+    data_file: Path = Field(default_factory=_resolve_data_file)
 
     @property
     def max_upload_bytes(self) -> int:
