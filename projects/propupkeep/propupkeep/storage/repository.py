@@ -6,16 +6,12 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from propupkeep.core.errors import PersistenceError
-from propupkeep.models.issue import IssueReport, SnapshotRecord
+from propupkeep.models.issue import IssueReport
 
 
 class IssueRepository(ABC):
     @abstractmethod
     def save_issue_report(self, report: IssueReport) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def save_snapshot(self, snapshot: SnapshotRecord) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -34,14 +30,6 @@ class JsonlIssueRepository(IssueRepository):
             "entry_type": "issue_report",
             "created_at": report.created_at.isoformat(),
             "payload": report.model_dump(mode="json"),
-        }
-        self._append_entry(entry)
-
-    def save_snapshot(self, snapshot: SnapshotRecord) -> None:
-        entry = {
-            "entry_type": "snapshot",
-            "created_at": snapshot.created_at.isoformat(),
-            "payload": snapshot.model_dump(mode="json"),
         }
         self._append_entry(entry)
 

@@ -7,7 +7,7 @@ This refactor moves the prototype into a modular architecture designed for inter
 ## Features
 
 - Streamlit UI with three tabs:
-  - **Quick Snap** (photo upload metadata)
+  - **Quick Snap** (photo upload + optional note -> structured IssueReport)
   - **Unit Notes** (raw text notes -> AI structured issue report)
   - **Community Feed** (review saved activity logs)
 - Pydantic domain model (`IssueReport`) and strict AI response validation
@@ -16,6 +16,10 @@ This refactor moves the prototype into a modular architecture designed for inter
 - Local persistence via JSONL (no external database required)
 - Environment-driven configuration via `python-dotenv`
 - Structured JSON logging + user-friendly error handling
+- Fact-fidelity safeguards:
+  - preserve user-stated entities (unit IDs, locations, numbers, nouns)
+  - extracted entity buckets + confidence fields
+  - follow-up question generation when details are missing
 - Basic security hygiene:
   - Never logs API keys
   - Input sanitization for notes and filenames
@@ -95,6 +99,12 @@ OPENAI_TIMEOUT_SECONDS=45
 streamlit run app.py
 ```
 
+Equivalent:
+
+```bash
+python -m streamlit run app.py
+```
+
 You can also run from repo root:
 
 ```bash
@@ -139,12 +149,12 @@ streamlit run projects/propupkeep/app.py
 
 ## Core Flow
 
-1. User selects building/unit and enters notes (or uploads photo metadata).
-2. Notes are sanitized and sent to AI formatter.
+1. User selects property/building/unit/area and submits from Unit Notes or Quick Snap.
+2. Notes/photo metadata are sanitized and sent to one shared issue workflow.
 3. AI response must be valid JSON and pass Pydantic validation.
 4. If invalid, app triggers one repair pass and retries validation once.
 5. Router maps category/urgency to recipients.
-6. Final report is persisted locally in JSONL and shown in UI/community feed.
+6. Final IssueReport is persisted locally in JSONL and shown in UI/community feed.
 
 ---
 

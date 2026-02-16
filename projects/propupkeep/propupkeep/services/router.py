@@ -12,12 +12,16 @@ class IssueRouter:
         IssueCategory.APPLIANCE: ["Appliance Vendor", "Maintenance Team"],
         IssueCategory.COSMETIC: ["Turn Team"],
         IssueCategory.GENERAL: ["Maintenance Team"],
+        IssueCategory.UNKNOWN: ["Operations Triage Desk"],
     }
 
     _high_priority_recipients = ["Community Manager"]
+    _unknown_priority_recipients = ["Leasing Follow-up Desk"]
 
     def route_recipients(self, category: IssueCategory, urgency: Urgency) -> list[str]:
         recipients = list(self._category_defaults.get(category, ["Maintenance Team"]))
         if urgency == Urgency.HIGH:
             recipients.extend(self._high_priority_recipients)
+        if urgency == Urgency.UNKNOWN:
+            recipients.extend(self._unknown_priority_recipients)
         return sorted(set(recipients))
