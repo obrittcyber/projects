@@ -5,8 +5,8 @@ import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from core.errors import PersistenceError
-from models.issue import IssueReport, SnapshotRecord
+from propupkeep.core.errors import PersistenceError
+from propupkeep.models.issue import IssueReport, SnapshotRecord
 
 
 class IssueRepository(ABC):

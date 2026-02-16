@@ -4,13 +4,13 @@ from datetime import datetime
 
 import streamlit as st
 
-from ai.formatter import OpenAIIssueFormatter
-from config.settings import Settings, get_settings
-from core.errors import UserVisibleError
-from core.logging_utils import configure_logging, get_logger
-from core.workflows import IssueWorkflowService
-from services.router import IssueRouter
-from storage.repository import JsonlIssueRepository
+from propupkeep.ai.formatter import OpenAIIssueFormatter
+from propupkeep.config.settings import Settings, get_settings
+from propupkeep.core.errors import UserVisibleError
+from propupkeep.core.logging_utils import configure_logging, get_logger
+from propupkeep.core.workflows import IssueWorkflowService
+from propupkeep.services.router import IssueRouter
+from propupkeep.storage.repository import JsonlIssueRepository
 
 
 def _render_base_styles() -> None:

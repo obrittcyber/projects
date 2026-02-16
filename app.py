@@ -1,4 +1,4 @@
-from ui.streamlit_app import run_app
+from propupkeep.ui.streamlit_app import run_app
 
 
 run_app()

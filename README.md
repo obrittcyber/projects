@@ -29,25 +29,26 @@ This refactor moves the prototype into a modular architecture designed for inter
 ```text
 .
 ├── app.py
-├── ai/
-│   ├── formatter.py
-│   └── prompts.py
-├── config/
-│   └── settings.py
-├── core/
-│   ├── errors.py
-│   ├── logging_utils.py
-│   ├── sanitize.py
-│   └── workflows.py
-├── data/
-├── models/
-│   └── issue.py
-├── services/
-│   └── router.py
-├── storage/
-│   └── repository.py
-├── ui/
-│   └── streamlit_app.py
+├── propupkeep/
+│   ├── ai/
+│   │   ├── formatter.py
+│   │   └── prompts.py
+│   ├── config/
+│   │   └── settings.py
+│   ├── core/
+│   │   ├── errors.py
+│   │   ├── logging_utils.py
+│   │   ├── sanitize.py
+│   │   └── workflows.py
+│   ├── data/
+│   ├── models/
+│   │   └── issue.py
+│   ├── services/
+│   │   └── router.py
+│   ├── storage/
+│   │   └── repository.py
+│   └── ui/
+│       └── streamlit_app.py
 └── requirements.txt
 ```
 
@@ -76,7 +77,7 @@ MODEL=gpt-4.1-mini
 LOG_LEVEL=INFO
 MAX_UPLOAD_MB=5
 MAX_INPUT_CHARS=3000
-DATA_FILE=data/activity.jsonl
+DATA_FILE=propupkeep/data/activity.jsonl
 OPENAI_TIMEOUT_SECONDS=45
 ```
 
@@ -94,21 +95,21 @@ streamlit run app.py
 
 ```text
                +-------------------------+
-               |   Streamlit UI (ui/)    |
+               | Streamlit UI (propupkeep/ui) |
                |  app.py -> streamlit    |
                +------------+------------+
                             |
                             v
                +-------------------------+
                | Core Workflow Service   |
-               |     (core/workflows)    |
+               | (propupkeep/core/workflows) |
                +-----+-------------+-----+
                      |             |
                      |             |
                      v             v
          +----------------+   +-------------------+
          | AI Formatter   |   | Routing Service   |
-         |  (ai/)         |   |  (services/)      |
+         | (propupkeep/ai)|   |(propupkeep/services)|
          +-------+--------+   +---------+---------+
                  |                      |
                  v                      |
@@ -118,7 +119,7 @@ streamlit run app.py
                                         v
                            +-------------------------+
                            | Persistence Repository  |
-                           |   JSONL (storage/)      |
+                           | JSONL (propupkeep/storage) |
                            +-------------------------+
 ```
 

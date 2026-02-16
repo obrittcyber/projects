@@ -31,7 +31,11 @@ class Settings(BaseModel):
 
     max_upload_mb: int = Field(default_factory=lambda: int(os.getenv("MAX_UPLOAD_MB", "5")))
     max_input_chars: int = Field(default_factory=lambda: int(os.getenv("MAX_INPUT_CHARS", "3000")))
-    data_file: Path = Field(default_factory=lambda: Path(os.getenv("DATA_FILE", "data/activity.jsonl")))
+    data_file: Path = Field(
+        default_factory=lambda: Path(
+            os.getenv("DATA_FILE", "propupkeep/data/activity.jsonl")
+        )
+    )
 
     @property
     def max_upload_bytes(self) -> int:

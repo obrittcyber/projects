@@ -7,11 +7,11 @@ from urllib.request import Request, urlopen
 
 from pydantic import ValidationError
 
-from ai.prompts import JSON_OUTPUT_INSTRUCTIONS, TEAM_BRIEF_SYSTEM_PROMPT
-from config.settings import Settings
-from core.errors import AIFormattingError, ConfigurationError
-from core.logging_utils import get_logger
-from models.issue import AIFormattedIssue
+from propupkeep.ai.prompts import JSON_OUTPUT_INSTRUCTIONS, TEAM_BRIEF_SYSTEM_PROMPT
+from propupkeep.config.settings import Settings
+from propupkeep.core.errors import AIFormattingError, ConfigurationError
+from propupkeep.core.logging_utils import get_logger
+from propupkeep.models.issue import AIFormattedIssue
 
 
 class OpenAIIssueFormatter:

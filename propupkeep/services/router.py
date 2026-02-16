@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from models.issue import IssueCategory, Urgency
+from propupkeep.models.issue import IssueCategory, Urgency
 
 
 class IssueRouter:

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from ai.formatter import OpenAIIssueFormatter
-from core.errors import UserVisibleError
-from core.logging_utils import get_logger
-from core.sanitize import sanitize_filename, sanitize_user_text
-from models.issue import IssueReport, SnapshotRecord
-from services.router import IssueRouter
-from storage.repository import IssueRepository
+from propupkeep.ai.formatter import OpenAIIssueFormatter
+from propupkeep.core.errors import UserVisibleError
+from propupkeep.core.logging_utils import get_logger
+from propupkeep.core.sanitize import sanitize_filename, sanitize_user_text
+from propupkeep.models.issue import IssueReport, SnapshotRecord
+from propupkeep.services.router import IssueRouter
+from propupkeep.storage.repository import IssueRepository
 
 
 class IssueWorkflowService:
