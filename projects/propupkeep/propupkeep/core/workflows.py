@@ -124,7 +124,7 @@ class IssueWorkflowService:
         note_block = note_text or "[none provided]"
         image_name = image_filename or "[none provided]"
         image_length = len(image_bytes) if image_bytes else 0
-        return (
+        context = (
             f"Source: {source.value}\n"
             f"Property: {metadata.property_name}\n"
             f"Building: {metadata.building}\n"
@@ -134,3 +134,4 @@ class IssueWorkflowService:
             f"Image Filename: {image_name}\n"
             f"Image Bytes Length: {image_length}"
         )
+        return context[:4000]
