@@ -5,3 +5,5 @@ __pycache__/
 .env
 **/.env
 projects/**/propupkeep/data/*.jsonl
+projects/**/propupkeep/data/uploads/*
+!projects/**/propupkeep/data/uploads/.gitkeep

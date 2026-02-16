@@ -26,6 +26,7 @@ class OpenAIIssueFormatter:
         note_text: str | None,
         image_filename: str | None = None,
         image_bytes: bytes | None = None,
+        image_mime: str | None = None,
     ) -> AIFormattedIssue:
         if not self._settings.openai_api_key:
             raise ConfigurationError(
@@ -38,6 +39,7 @@ class OpenAIIssueFormatter:
             note_text=note_text,
             image_filename=image_filename,
             image_bytes=image_bytes,
+            image_mime=image_mime,
         )
         messages = [
             {"role": "system", "content": f"{TEAM_BRIEF_SYSTEM_PROMPT}\n\n{JSON_OUTPUT_INSTRUCTIONS}"},
@@ -61,6 +63,7 @@ class OpenAIIssueFormatter:
                 note_text=note_text,
                 image_filename=image_filename,
                 image_bytes=image_bytes,
+                image_mime=image_mime,
             )
             try:
                 return self._parse_and_validate(repaired_content)
@@ -83,6 +86,7 @@ class OpenAIIssueFormatter:
         note_text: str | None,
         image_filename: str | None,
         image_bytes: bytes | None,
+        image_mime: str | None,
     ) -> str:
         submission_context = self._build_user_prompt(
             source=source,
@@ -90,6 +94,7 @@ class OpenAIIssueFormatter:
             note_text=note_text,
             image_filename=image_filename,
             image_bytes=image_bytes,
+            image_mime=image_mime,
         )
         repair_prompt = (
             "Your previous answer failed JSON validation.\n"
@@ -176,9 +181,11 @@ class OpenAIIssueFormatter:
         note_text: str | None,
         image_filename: str | None,
         image_bytes: bytes | None,
+        image_mime: str | None,
     ) -> str:
         note_block = note_text if note_text else "[none provided]"
         image_name = image_filename if image_filename else "[none provided]"
+        mime_block = image_mime if image_mime else "Unknown"
         image_size = len(image_bytes) if image_bytes else 0
         area = metadata.area if metadata.area else "Unknown"
 
@@ -194,6 +201,7 @@ class OpenAIIssueFormatter:
             f"- area: {area}\n"
             f"- note_text: {note_block}\n"
             f"- image_filename: {image_name}\n"
+            f"- image_mime: {mime_block}\n"
             f"- image_bytes_length: {image_size}\n\n"
             "When source is photo and note_text is empty, rely on filename/metadata only "
             "and ask follow-up questions as needed."

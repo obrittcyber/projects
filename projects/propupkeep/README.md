@@ -9,7 +9,7 @@ This refactor moves the prototype into a modular architecture designed for inter
 - Streamlit UI with three tabs:
   - **Quick Snap** (photo upload + optional note -> structured IssueReport)
   - **Unit Notes** (raw text notes -> AI structured issue report)
-  - **Community Feed** (review saved activity logs)
+  - **Community Feed** (review saved activity logs + photo thumbnails)
 - Pydantic domain model (`IssueReport`) and strict AI response validation
 - One automatic repair retry when AI output is invalid JSON/schema
 - Rules-based routing (`category + urgency -> recipients`)
@@ -20,6 +20,7 @@ This refactor moves the prototype into a modular architecture designed for inter
   - preserve user-stated entities (unit IDs, locations, numbers, nouns)
   - extracted entity buckets + confidence fields
   - follow-up question generation when details are missing
+- Uploaded images are persisted locally and referenced by IssueReport `image_path`
 - Basic security hygiene:
   - Never logs API keys
   - Input sanitization for notes and filenames
@@ -88,6 +89,7 @@ LOG_LEVEL=INFO
 MAX_UPLOAD_MB=5
 MAX_INPUT_CHARS=3000
 DATA_FILE=propupkeep/data/activity.jsonl
+UPLOADS_DIR=propupkeep/data/uploads
 OPENAI_TIMEOUT_SECONDS=45
 ```
 

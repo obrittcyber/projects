@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -172,6 +173,8 @@ class IssueReport(BaseModel):
     area: str | None = Field(default=None, max_length=120)
     note_text: str | None = Field(default=None, max_length=3000)
     image_filename: str | None = Field(default=None, max_length=255)
+    image_path: str | None = Field(default=None, max_length=500)
+    image_mime: str | None = Field(default=None, max_length=50)
     raw_observations: str = Field(..., min_length=1, max_length=4000)
     reported_observation: str = Field(..., min_length=3, max_length=1000)
     issue: str = Field(..., min_length=3, max_length=500)
@@ -193,6 +196,8 @@ class IssueReport(BaseModel):
         "area",
         "note_text",
         "image_filename",
+        "image_path",
+        "image_mime",
         "raw_observations",
         "reported_observation",
         "issue",
@@ -206,3 +211,24 @@ class IssueReport(BaseModel):
             stripped = value.strip()
             return stripped or None
         return value
+
+    @field_validator("image_path")
+    @classmethod
+    def validate_image_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError("image_path must be a safe relative path.")
+        return value
+
+    @field_validator("image_mime")
+    @classmethod
+    def validate_image_mime(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        allowed = {"image/png", "image/jpeg", "image/jpg"}
+        normalized = value.lower().strip()
+        if normalized not in allowed:
+            raise ValueError("image_mime must be one of image/png, image/jpeg, image/jpg.")
+        return normalized

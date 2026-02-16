@@ -29,7 +29,7 @@ class JsonlIssueRepository(IssueRepository):
         entry = {
             "entry_type": "issue_report",
             "created_at": report.created_at.isoformat(),
-            "payload": report.model_dump(mode="json"),
+            "payload": report.model_dump(mode="json", exclude_none=False),
         }
         self._append_entry(entry)
 
