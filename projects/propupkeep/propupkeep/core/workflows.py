@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
+
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from propupkeep.ai.formatter import OpenAIIssueFormatter
 from propupkeep.core.errors import UserVisibleError
@@ -13,6 +16,7 @@ from propupkeep.storage.repository import IssueRepository
 
 
 class IssueWorkflowService:
+    _max_saved_image_width = 800
     _allowed_image_mime = {"image/png", "image/jpeg", "image/jpg"}
     _mime_to_extension = {
         "image/png": ".png",
@@ -205,8 +209,25 @@ class IssueWorkflowService:
             raise UserVisibleError("Invalid upload target path.")
 
         try:
-            with target_path.open("wb") as handle:
-                handle.write(image_bytes)
+            with Image.open(BytesIO(image_bytes)) as image:
+                normalized_image = ImageOps.exif_transpose(image)
+                resized_image = self._resize_for_storage(normalized_image)
+
+                if extension == ".png":
+                    if resized_image.mode not in {"RGB", "RGBA", "L", "P"}:
+                        resized_image = resized_image.convert("RGBA")
+                    resized_image.save(target_path, format="PNG", optimize=True)
+                else:
+                    if resized_image.mode not in {"RGB", "L"}:
+                        resized_image = resized_image.convert("RGB")
+                    resized_image.save(
+                        target_path,
+                        format="JPEG",
+                        optimize=True,
+                        quality=90,
+                    )
+        except UnidentifiedImageError as exc:
+            raise UserVisibleError("Uploaded image could not be processed. Please try another file.") from exc
         except OSError as exc:
             raise UserVisibleError(
                 "Could not store uploaded image locally.",
@@ -218,3 +239,11 @@ class IssueWorkflowService:
         except ValueError as exc:
             raise UserVisibleError("Could not resolve upload storage path safely.") from exc
         return str(relative_path)
+
+    def _resize_for_storage(self, image: Image.Image) -> Image.Image:
+        if image.width <= self._max_saved_image_width:
+            return image.copy()
+
+        ratio = self._max_saved_image_width / float(image.width)
+        new_height = max(1, int(image.height * ratio))
+        return image.resize((self._max_saved_image_width, new_height), Image.Resampling.LANCZOS)

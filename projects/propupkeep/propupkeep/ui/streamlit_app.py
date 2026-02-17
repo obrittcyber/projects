@@ -168,10 +168,6 @@ def _render_structured_report(report: dict, heading: str = "Structured Report") 
 
     if report.get("image_filename"):
         st.markdown(f"**Image Filename**\n\n{report['image_filename']}")
-    if report.get("image_path"):
-        st.markdown(f"**Image Path**\n\n{report['image_path']}")
-    if report.get("image_mime"):
-        st.markdown(f"**Image MIME**\n\n{report['image_mime']}")
 
 
 def run_app() -> None:
