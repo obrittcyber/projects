@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 import streamlit as st
 
@@ -487,8 +488,8 @@ def run_app() -> None:
             if not filtered_issues:
                 st.info("No feed items match the selected filters.")
 
-            for issue in filtered_issues:
-                issue_id = issue.report_id
+            for issue_idx, issue in enumerate(filtered_issues):
+                issue_id = str(issue.report_id or f"issue-{issue_idx}-{uuid4()}")
                 issue_text = issue.issue
                 urgency = issue.urgency.value
                 category = issue.category.value
@@ -563,42 +564,47 @@ def run_app() -> None:
                                 st.rerun()
 
                         st.caption("Internal team comments")
-                        author_col, role_col = st.columns([2, 2], gap="small")
-                        with author_col:
-                            comment_author = st.text_input(
-                                "Author Name",
-                                key=f"comment_author_{issue_id}",
-                                placeholder="Name",
-                            )
-                        with role_col:
-                            comment_role = st.selectbox(
-                                "Author Role",
-                                options=list(COMMENT_AUTHOR_ROLES),
-                                key=f"comment_role_{issue_id}",
-                            )
-                        comment_message = st.text_area(
-                            "Comment Message",
-                            key=f"comment_message_{issue_id}",
-                            height=90,
-                            placeholder="Add an internal coordination note...",
-                        )
-                        if st.button("Post Comment", key=f"post_comment_{issue_id}"):
-                            try:
-                                workflow.add_issue_comment(
-                                    issue_id=issue_id,
-                                    author_name=comment_author,
-                                    author_role=comment_role,
-                                    message=comment_message,
+                        with st.form(key=f"comment_form_{issue_id}", clear_on_submit=True):
+                            author_col, role_col = st.columns([2, 2], gap="small")
+                            with author_col:
+                                comment_author = st.text_input(
+                                    "Author Name",
+                                    key=f"comment_author_{issue_id}",
+                                    placeholder="Name",
                                 )
-                            except UserVisibleError as exc:
-                                st.error(exc.user_message)
-                            except Exception:  # noqa: BLE001
-                                logger.exception("Failed to post issue comment")
-                                st.error("Could not post comment right now.")
-                            else:
-                                st.session_state[f"comment_message_{issue_id}"] = ""
-                                st.success("Comment posted.")
-                                st.rerun()
+                            with role_col:
+                                comment_role = st.selectbox(
+                                    "Author Role",
+                                    options=list(COMMENT_AUTHOR_ROLES),
+                                    key=f"comment_role_{issue_id}",
+                                )
+                            comment_message = st.text_area(
+                                "Comment Message",
+                                key=f"comment_message_{issue_id}",
+                                height=90,
+                                max_chars=800,
+                                placeholder="Add an internal coordination note...",
+                            )
+                            submitted = st.form_submit_button("Post Comment")
+                            if submitted:
+                                if not comment_message.strip():
+                                    st.warning("Please enter a comment message before posting.")
+                                else:
+                                    try:
+                                        workflow.add_issue_comment(
+                                            issue_id=issue_id,
+                                            author_name=comment_author,
+                                            author_role=comment_role,
+                                            message=comment_message,
+                                        )
+                                    except UserVisibleError as exc:
+                                        st.error(exc.user_message)
+                                    except Exception:  # noqa: BLE001
+                                        logger.exception("Failed to post issue comment")
+                                        st.error("Could not post comment right now.")
+                                    else:
+                                        st.success("Comment posted.")
+                                        st.rerun()
 
                         if issue.comments:
                             st.markdown("**Comment History**")
