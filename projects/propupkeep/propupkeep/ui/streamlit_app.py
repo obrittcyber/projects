@@ -80,6 +80,39 @@ def _format_ts(value: str) -> str:
         return value
 
 
+def _date_sort_value(value: str | None) -> float:
+    if not value:
+        return float("-inf")
+    raw = str(value).strip()
+    if not raw:
+        return float("-inf")
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+        return parsed.timestamp()
+    except Exception:  # noqa: BLE001
+        return float("-inf")
+
+
+def _urgency_rank(value: str | None) -> int:
+    ranking = {
+        "emergency": 4,
+        "high": 3,
+        "medium": 2,
+        "low": 1,
+        "unknown": 0,
+    }
+    normalized = (value or "").strip().lower()
+    return ranking.get(normalized, 0)
+
+
+def _is_maintenance_routed(recipients: list[str] | None) -> bool:
+    if not recipients:
+        return False
+    return any("maintenance" in str(item).lower() for item in recipients)
+
+
 def _resolve_image_path(project_root: Path, image_path: str) -> Path | None:
     try:
         raw_path = Path(image_path)
@@ -152,9 +185,9 @@ def run_app() -> None:
     logger = get_logger(__name__)
     settings, workflow = _build_workflow()
 
-    st.title("PropUpkeep")
-    st.caption("Mobile-first intake for leasing and maintenance coordination")
-    st.warning("Not for emergencies; call 911/management.")
+    st.title("PropUpkeep — AI-Powered Operational Visibility")
+    st.caption("Turn field observations into structured, routable work items with an audit trail.")
+    st.caption("Not for emergencies; call 911/management.")
 
     with st.sidebar:
         st.header("Property Selector")
@@ -343,74 +376,140 @@ def run_app() -> None:
         if not activity:
             st.info("No entries yet. Submit from Quick Snap or Unit Notes to populate this feed.")
         else:
-            for entry in activity:
-                entry_type = entry.get("entry_type")
-                payload = entry.get("payload", {})
-                timestamp = _format_ts(entry.get("created_at", ""))
-                source_label = payload.get("source", entry_type)
-                property_label = payload.get("property_name", "-")
-                area_label = payload.get("area", "Unknown")
+            issue_records = [
+                entry
+                for entry in activity
+                if entry.get("entry_type") == "issue_report" and isinstance(entry.get("payload"), dict)
+            ]
 
-                st.markdown('<div class="feed-card">', unsafe_allow_html=True)
-                st.markdown(
-                    (
-                        f"<div class='feed-meta'>{property_label}"
-                        f" · {payload.get('building', '-')}"
-                        f" · Unit {payload.get('unit_number', '-')}"
-                        f" · {area_label}"
-                        f" · {source_label}"
-                        f" · {timestamp}</div>"
-                    ),
-                    unsafe_allow_html=True,
+            category_options = sorted(
+                {
+                    str(record["payload"].get("category", "")).strip()
+                    for record in issue_records
+                    if str(record["payload"].get("category", "")).strip()
+                }
+            )
+            category_filter_options = ["All", "Maintenance View", *category_options]
+
+            filter_col_1, filter_col_2, filter_col_3 = st.columns([2, 1, 2], gap="small")
+            with filter_col_1:
+                category_filter = st.selectbox(
+                    "Category / Department",
+                    options=category_filter_options,
+                    index=0,
+                    key="feed_category_department_filter",
                 )
-                if entry_type == "issue_report":
-                    source = payload.get("source", "unknown")
-                    image_path = payload.get("image_path")
-                    detail_col = st.container()
-                    if image_path:
-                        thumb_col, content_col = st.columns([1, 3], gap="small")
-                        with thumb_col:
-                            resolved_path = _resolve_image_path(settings.project_root, image_path)
+            with filter_col_2:
+                source_filter = st.selectbox(
+                    "Source",
+                    options=["All", "note", "photo"],
+                    index=0,
+                    key="feed_source_filter",
+                )
+            with filter_col_3:
+                sort_by = st.selectbox(
+                    "Sort by",
+                    options=[
+                        "Date (Newest)",
+                        "Date (Oldest)",
+                        "Urgency (High->Low)",
+                        "Urgency (Low->High)",
+                    ],
+                    index=0,
+                    key="feed_sort_by",
+                )
+
+            filtered_records = issue_records
+            if category_filter == "Maintenance View":
+                filtered_records = [
+                    record
+                    for record in filtered_records
+                    if _is_maintenance_routed(record["payload"].get("recipients", []))
+                ]
+            elif category_filter != "All":
+                filtered_records = [
+                    record
+                    for record in filtered_records
+                    if str(record["payload"].get("category", "")).strip() == category_filter
+                ]
+
+            if source_filter != "All":
+                filtered_records = [
+                    record
+                    for record in filtered_records
+                    if str(record["payload"].get("source", "")).strip().lower() == source_filter
+                ]
+
+            if sort_by == "Date (Newest)":
+                filtered_records = sorted(
+                    filtered_records,
+                    key=lambda record: _date_sort_value(record.get("created_at")),
+                    reverse=True,
+                )
+            elif sort_by == "Date (Oldest)":
+                filtered_records = sorted(
+                    filtered_records,
+                    key=lambda record: _date_sort_value(record.get("created_at")),
+                )
+            elif sort_by == "Urgency (High->Low)":
+                filtered_records = sorted(
+                    filtered_records,
+                    key=lambda record: (
+                        _urgency_rank(record["payload"].get("urgency")),
+                        _date_sort_value(record.get("created_at")),
+                    ),
+                    reverse=True,
+                )
+            else:  # Urgency (Low->High)
+                filtered_records = sorted(
+                    filtered_records,
+                    key=lambda record: (
+                        _urgency_rank(record["payload"].get("urgency")),
+                        _date_sort_value(record.get("created_at")),
+                    ),
+                )
+
+            if not filtered_records:
+                st.info("No feed items match the selected filters.")
+
+            for record in filtered_records:
+                payload = record["payload"]
+                issue_text = payload.get("issue", "")
+                urgency = payload.get("urgency", "Unknown")
+                category = payload.get("category", "Unknown")
+                action = payload.get("recommended_action", "")
+                recipients = payload.get("recipients", [])
+                source = payload.get("source", "unknown")
+                timestamp = _format_ts(str(record.get("created_at", "")))
+                location = (
+                    f"{payload.get('property_name', '-')}"
+                    f" · {payload.get('building', '-')}"
+                    f" · Unit {payload.get('unit_number', '-')}"
+                    f" · {payload.get('area', 'Unknown') or 'Unknown'}"
+                )
+                image_path = payload.get("image_path")
+
+                with st.container():
+                    thumb_col, detail_col = st.columns([1, 3], gap="small")
+                    with thumb_col:
+                        if image_path:
+                            resolved_path = _resolve_image_path(settings.project_root, str(image_path))
                             if resolved_path and resolved_path.exists():
                                 st.image(str(resolved_path), width=160)
                             else:
                                 st.caption("Image not available")
-                        detail_col = content_col
+                        else:
+                            st.caption("No image")
 
                     with detail_col:
-                        st.markdown(f"**Issue:** {payload.get('issue', '')}")
+                        st.markdown(f"**Issue:** {issue_text}")
+                        st.markdown(f"**Urgency:** {urgency}")
+                        st.markdown(f"**Category:** {category}")
+                        st.markdown(f"**Recommended Action:** {action}")
+                        st.markdown(
+                            f"**Recipients:** {', '.join(recipients) if recipients else 'Unassigned'}"
+                        )
                         st.markdown(f"**Source:** {source}")
-                        st.markdown(f"**Urgency:** {payload.get('urgency', '')}")
-                        st.markdown(f"**Category:** {payload.get('category', '')}")
-                        st.markdown(
-                            f"**Recommended Action:** {payload.get('recommended_action', '')}"
-                        )
-                        st.markdown(
-                            f"**Reported Observation:** {payload.get('reported_observation', '')}"
-                        )
-                        recipients = payload.get("recipients", [])
-                        if recipients:
-                            st.markdown(f"**Recipients:** {', '.join(recipients)}")
-                        if payload.get("image_filename"):
-                            st.markdown(f"**Image Filename:** {payload.get('image_filename')}")
-                        if payload.get("image_mime"):
-                            st.markdown(f"**Image MIME:** {payload.get('image_mime')}")
-                        if payload.get("needs_followup"):
-                            questions = payload.get("followup_questions", [])
-                            if questions:
-                                st.markdown(
-                                    "**Follow-up Questions:**\n\n" + "\n".join(f"- {q}" for q in questions)
-                                )
-                        extracted = payload.get("extracted_entities", {})
-                        if extracted:
-                            extracted_lines = []
-                            for label, values in extracted.items():
-                                if values:
-                                    extracted_lines.append(f"- {label}: {', '.join(values)}")
-                            if extracted_lines:
-                                st.markdown("**Extracted Entities:**\n\n" + "\n".join(extracted_lines))
-                else:  # Backward compatibility for older activity entries.
-                    st.markdown(f"**Legacy Entry Type:** {entry_type}")
-                    if payload:
-                        st.json(payload)
-                st.markdown("</div>", unsafe_allow_html=True)
+                        st.markdown(f"**Timestamp:** {timestamp}")
+                        st.markdown(f"**Location:** {location}")
+                st.divider()
