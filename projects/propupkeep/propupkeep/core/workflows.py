@@ -10,13 +10,14 @@ from propupkeep.ai.formatter import OpenAIIssueFormatter
 from propupkeep.core.errors import UserVisibleError
 from propupkeep.core.logging_utils import get_logger
 from propupkeep.core.sanitize import sanitize_filename, sanitize_user_text
-from propupkeep.models.issue import IssueMetadata, IssueReport, IssueSource
+from propupkeep.models.issue import COMMENT_AUTHOR_ROLES, Comment, IssueMetadata, IssueReport, IssueSource, Status
 from propupkeep.services.router import IssueRouter
 from propupkeep.storage.repository import IssueRepository
 
 
 class IssueWorkflowService:
     _max_saved_image_width = 800
+    _max_comment_chars = 800
     _allowed_image_mime = {"image/png", "image/jpeg", "image/jpg"}
     _mime_to_extension = {
         "image/png": ".png",
@@ -127,7 +128,7 @@ class IssueWorkflowService:
             recipients=recipients,
         )
 
-        self._repository.save_issue_report(report)
+        self._repository.upsert_issue(report)
         self._logger.info(
             "Issue report created",
             extra={
@@ -144,6 +145,57 @@ class IssueWorkflowService:
             },
         )
         return report
+
+    def list_issues(self, limit: int = 100) -> list[IssueReport]:
+        return self._repository.list_issues()[:limit]
+
+    def update_issue_status(self, issue_id: str, new_status: Status) -> IssueReport:
+        updated_issue = self._repository.update_status(issue_id=issue_id, new_status=new_status)
+        self._logger.info(
+            "Issue status updated",
+            extra={
+                "context": {
+                    "report_id": updated_issue.report_id,
+                    "status": updated_issue.status.value,
+                }
+            },
+        )
+        return updated_issue
+
+    def add_issue_comment(
+        self,
+        issue_id: str,
+        author_name: str,
+        author_role: str,
+        message: str,
+    ) -> IssueReport:
+        sanitized_author = sanitize_user_text(author_name, max_chars=80)
+        if not sanitized_author:
+            raise UserVisibleError("Please enter a name before posting a comment.")
+
+        if author_role not in COMMENT_AUTHOR_ROLES:
+            raise UserVisibleError("Please choose a valid team role.")
+
+        sanitized_message = sanitize_user_text(message, max_chars=self._max_comment_chars)
+        if not sanitized_message:
+            raise UserVisibleError("Please enter a comment message.")
+
+        comment = Comment(
+            author_name=sanitized_author,
+            author_role=author_role,
+            message=sanitized_message,
+        )
+        updated_issue = self._repository.add_comment(issue_id=issue_id, comment=comment)
+        self._logger.info(
+            "Issue comment added",
+            extra={
+                "context": {
+                    "report_id": updated_issue.report_id,
+                    "comment_id": comment.comment_id,
+                }
+            },
+        )
+        return updated_issue
 
     def list_recent_activity(self, limit: int = 100) -> list[dict]:
         return self._repository.list_recent_activity(limit=limit)

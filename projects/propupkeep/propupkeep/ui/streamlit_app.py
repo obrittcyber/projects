@@ -10,7 +10,7 @@ from propupkeep.config.settings import Settings, get_settings
 from propupkeep.core.errors import UserVisibleError
 from propupkeep.core.logging_utils import configure_logging, get_logger
 from propupkeep.core.workflows import IssueWorkflowService
-from propupkeep.models.issue import IssueMetadata, IssueSource
+from propupkeep.models.issue import COMMENT_AUTHOR_ROLES, IssueMetadata, IssueSource, Status
 from propupkeep.services.router import IssueRouter
 from propupkeep.storage.repository import JsonlIssueRepository
 
@@ -72,24 +72,33 @@ def _build_workflow() -> tuple[Settings, IssueWorkflowService]:
     return settings, workflow
 
 
-def _format_ts(value: str) -> str:
+def _format_ts(value: str | datetime | None) -> str:
     try:
-        parsed = datetime.fromisoformat(value)
+        if isinstance(value, datetime):
+            parsed = value
+        else:
+            raw = str(value or "").strip()
+            if raw.endswith("Z"):
+                raw = f"{raw[:-1]}+00:00"
+            parsed = datetime.fromisoformat(raw)
         return parsed.astimezone().strftime("%b %d, %Y %I:%M %p")
     except Exception:  # noqa: BLE001
-        return value
+        return str(value or "")
 
 
-def _date_sort_value(value: str | None) -> float:
+def _date_sort_value(value: str | datetime | None) -> float:
     if not value:
         return float("-inf")
-    raw = str(value).strip()
-    if not raw:
-        return float("-inf")
-    if raw.endswith("Z"):
-        raw = f"{raw[:-1]}+00:00"
     try:
-        parsed = datetime.fromisoformat(raw)
+        if isinstance(value, datetime):
+            parsed = value
+        else:
+            raw = str(value).strip()
+            if not raw:
+                return float("-inf")
+            if raw.endswith("Z"):
+                raw = f"{raw[:-1]}+00:00"
+            parsed = datetime.fromisoformat(raw)
         return parsed.timestamp()
     except Exception:  # noqa: BLE001
         return float("-inf")
@@ -111,6 +120,22 @@ def _is_maintenance_routed(recipients: list[str] | None) -> bool:
     if not recipients:
         return False
     return any("maintenance" in str(item).lower() for item in recipients)
+
+
+def _status_badge_html(status: str) -> str:
+    palette = {
+        Status.OPEN.value: ("#1f2937", "#e5e7eb"),
+        Status.ACKNOWLEDGED.value: ("#1d4ed8", "#dbeafe"),
+        Status.IN_PROGRESS.value: ("#92400e", "#fef3c7"),
+        Status.MONITORING.value: ("#4338ca", "#e0e7ff"),
+        Status.RESOLVED.value: ("#166534", "#dcfce7"),
+    }
+    text_color, bg_color = palette.get(status, ("#1f2937", "#e5e7eb"))
+    return (
+        "<span style='display:inline-block;padding:0.2rem 0.55rem;border-radius:999px;"
+        f"font-size:0.78rem;font-weight:600;color:{text_color};background:{bg_color};'>"
+        f"{status}</span>"
+    )
 
 
 def _resolve_image_path(project_root: Path, image_path: str) -> Path | None:
@@ -359,30 +384,24 @@ def run_app() -> None:
     with community_feed_tab:
         st.subheader("Reviewing Logs")
         try:
-            activity = workflow.list_recent_activity(limit=100)
+            issues = workflow.list_issues(limit=100)
         except UserVisibleError as exc:
             logger.warning("Failed to load activity feed", extra={"context": {"detail": exc.detail}})
             st.error(exc.user_message)
-            activity = []
+            issues = []
         except Exception:  # noqa: BLE001
             logger.exception("Unexpected activity feed failure")
             st.error("Unexpected error while loading activity feed.")
-            activity = []
+            issues = []
 
-        if not activity:
+        if not issues:
             st.info("No entries yet. Submit from Quick Snap or Unit Notes to populate this feed.")
         else:
-            issue_records = [
-                entry
-                for entry in activity
-                if entry.get("entry_type") == "issue_report" and isinstance(entry.get("payload"), dict)
-            ]
-
             category_options = sorted(
                 {
-                    str(record["payload"].get("category", "")).strip()
-                    for record in issue_records
-                    if str(record["payload"].get("category", "")).strip()
+                    str(issue.category.value).strip()
+                    for issue in issues
+                    if str(issue.category.value).strip()
                 }
             )
             category_filter_options = ["All", "Maintenance View", *category_options]
@@ -415,75 +434,76 @@ def run_app() -> None:
                     key="feed_sort_by",
                 )
 
-            filtered_records = issue_records
+            filtered_issues = issues
             if category_filter == "Maintenance View":
-                filtered_records = [
-                    record
-                    for record in filtered_records
-                    if _is_maintenance_routed(record["payload"].get("recipients", []))
+                filtered_issues = [
+                    issue
+                    for issue in filtered_issues
+                    if _is_maintenance_routed(issue.recipients)
                 ]
             elif category_filter != "All":
-                filtered_records = [
-                    record
-                    for record in filtered_records
-                    if str(record["payload"].get("category", "")).strip() == category_filter
+                filtered_issues = [
+                    issue
+                    for issue in filtered_issues
+                    if str(issue.category.value).strip() == category_filter
                 ]
 
             if source_filter != "All":
-                filtered_records = [
-                    record
-                    for record in filtered_records
-                    if str(record["payload"].get("source", "")).strip().lower() == source_filter
+                filtered_issues = [
+                    issue
+                    for issue in filtered_issues
+                    if str(issue.source.value).strip().lower() == source_filter
                 ]
 
             if sort_by == "Date (Newest)":
-                filtered_records = sorted(
-                    filtered_records,
-                    key=lambda record: _date_sort_value(record.get("created_at")),
+                filtered_issues = sorted(
+                    filtered_issues,
+                    key=lambda issue: _date_sort_value(issue.created_at),
                     reverse=True,
                 )
             elif sort_by == "Date (Oldest)":
-                filtered_records = sorted(
-                    filtered_records,
-                    key=lambda record: _date_sort_value(record.get("created_at")),
+                filtered_issues = sorted(
+                    filtered_issues,
+                    key=lambda issue: _date_sort_value(issue.created_at),
                 )
             elif sort_by == "Urgency (High->Low)":
-                filtered_records = sorted(
-                    filtered_records,
-                    key=lambda record: (
-                        _urgency_rank(record["payload"].get("urgency")),
-                        _date_sort_value(record.get("created_at")),
+                filtered_issues = sorted(
+                    filtered_issues,
+                    key=lambda issue: (
+                        _urgency_rank(issue.urgency.value),
+                        _date_sort_value(issue.created_at),
                     ),
                     reverse=True,
                 )
             else:  # Urgency (Low->High)
-                filtered_records = sorted(
-                    filtered_records,
-                    key=lambda record: (
-                        _urgency_rank(record["payload"].get("urgency")),
-                        _date_sort_value(record.get("created_at")),
+                filtered_issues = sorted(
+                    filtered_issues,
+                    key=lambda issue: (
+                        _urgency_rank(issue.urgency.value),
+                        _date_sort_value(issue.created_at),
                     ),
                 )
 
-            if not filtered_records:
+            if not filtered_issues:
                 st.info("No feed items match the selected filters.")
 
-            for record in filtered_records:
-                payload = record["payload"]
-                issue_text = payload.get("issue", "")
-                urgency = payload.get("urgency", "Unknown")
-                category = payload.get("category", "Unknown")
-                action = payload.get("recommended_action", "")
-                recipients = payload.get("recipients", [])
-                source = payload.get("source", "unknown")
-                timestamp = _format_ts(str(record.get("created_at", "")))
+            for issue in filtered_issues:
+                issue_id = issue.report_id
+                issue_text = issue.issue
+                urgency = issue.urgency.value
+                category = issue.category.value
+                action = issue.recommended_action
+                recipients = issue.recipients
+                source = issue.source.value
+                timestamp = _format_ts(issue.created_at)
+                updated_timestamp = _format_ts(issue.updated_at)
                 location = (
-                    f"{payload.get('property_name', '-')}"
-                    f" · {payload.get('building', '-')}"
-                    f" · Unit {payload.get('unit_number', '-')}"
-                    f" · {payload.get('area', 'Unknown') or 'Unknown'}"
+                    f"{issue.property_name}"
+                    f" · {issue.building}"
+                    f" · Unit {issue.unit_number}"
+                    f" · {issue.area or 'Unknown'}"
                 )
-                image_path = payload.get("image_path")
+                image_path = issue.image_path
 
                 with st.container():
                     thumb_col, detail_col = st.columns([1, 3], gap="small")
@@ -498,6 +518,10 @@ def run_app() -> None:
                             st.caption("No image")
 
                     with detail_col:
+                        st.markdown(
+                            f"**Status:** {_status_badge_html(issue.status.value)}",
+                            unsafe_allow_html=True,
+                        )
                         st.markdown(f"**Issue:** {issue_text}")
                         st.markdown(f"**Urgency:** {urgency}")
                         st.markdown(f"**Category:** {category}")
@@ -507,5 +531,87 @@ def run_app() -> None:
                         )
                         st.markdown(f"**Source:** {source}")
                         st.markdown(f"**Timestamp:** {timestamp}")
+                        st.markdown(f"**Updated:** {updated_timestamp}")
                         st.markdown(f"**Location:** {location}")
+                        st.markdown(f"**Comments:** {len(issue.comments)}")
+                        if issue.image_filename:
+                            st.markdown(f"**Image Filename:** {issue.image_filename}")
+
+                        status_options = [status.value for status in Status]
+                        current_status = issue.status.value
+                        status_index = (
+                            status_options.index(current_status)
+                            if current_status in status_options
+                            else 0
+                        )
+                        selected_status = st.selectbox(
+                            "Update Status",
+                            options=status_options,
+                            index=status_index,
+                            key=f"status_select_{issue_id}",
+                        )
+                        if selected_status != current_status:
+                            try:
+                                workflow.update_issue_status(issue_id, Status(selected_status))
+                            except UserVisibleError as exc:
+                                st.error(exc.user_message)
+                            except Exception:  # noqa: BLE001
+                                logger.exception("Failed to update issue status")
+                                st.error("Could not update issue status right now.")
+                            else:
+                                st.success("Status updated.")
+                                st.rerun()
+
+                        st.caption("Internal team comments")
+                        author_col, role_col = st.columns([2, 2], gap="small")
+                        with author_col:
+                            comment_author = st.text_input(
+                                "Author Name",
+                                key=f"comment_author_{issue_id}",
+                                placeholder="Name",
+                            )
+                        with role_col:
+                            comment_role = st.selectbox(
+                                "Author Role",
+                                options=list(COMMENT_AUTHOR_ROLES),
+                                key=f"comment_role_{issue_id}",
+                            )
+                        comment_message = st.text_area(
+                            "Comment Message",
+                            key=f"comment_message_{issue_id}",
+                            height=90,
+                            placeholder="Add an internal coordination note...",
+                        )
+                        if st.button("Post Comment", key=f"post_comment_{issue_id}"):
+                            try:
+                                workflow.add_issue_comment(
+                                    issue_id=issue_id,
+                                    author_name=comment_author,
+                                    author_role=comment_role,
+                                    message=comment_message,
+                                )
+                            except UserVisibleError as exc:
+                                st.error(exc.user_message)
+                            except Exception:  # noqa: BLE001
+                                logger.exception("Failed to post issue comment")
+                                st.error("Could not post comment right now.")
+                            else:
+                                st.session_state[f"comment_message_{issue_id}"] = ""
+                                st.success("Comment posted.")
+                                st.rerun()
+
+                        if issue.comments:
+                            st.markdown("**Comment History**")
+                            ordered_comments = sorted(
+                                issue.comments,
+                                key=lambda comment: _date_sort_value(comment.created_at),
+                            )
+                            for comment in ordered_comments:
+                                st.markdown(
+                                    (
+                                        f"- **{comment.author_name}** ({comment.author_role}) "
+                                        f"@ {_format_ts(comment.created_at)}  \n"
+                                        f"  {comment.message}"
+                                    )
+                                )
                 st.divider()

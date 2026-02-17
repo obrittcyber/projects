@@ -31,6 +31,17 @@ class IssueSource(str, Enum):
     PHOTO = "photo"
 
 
+class Status(str, Enum):
+    OPEN = "OPEN"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    IN_PROGRESS = "IN_PROGRESS"
+    MONITORING = "MONITORING"
+    RESOLVED = "RESOLVED"
+
+
+COMMENT_AUTHOR_ROLES = ("Leasing", "Maintenance", "Safety", "PM", "Vendor", "Other")
+
+
 class ExtractedEntities(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -81,6 +92,28 @@ class IssueMetadata(BaseModel):
         if isinstance(value, str):
             stripped = value.strip()
             return stripped or None
+        return value
+
+
+class Comment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    comment_id: str = Field(default_factory=lambda: str(uuid4()))
+    author_name: str = Field(..., min_length=1, max_length=80)
+    author_role: str = Field(..., min_length=1, max_length=30)
+    message: str = Field(..., min_length=1, max_length=1000)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("author_name", "author_role", "message", mode="before")
+    @classmethod
+    def strip_comment_text(cls, value: str) -> str:
+        return str(value).strip()
+
+    @field_validator("author_role")
+    @classmethod
+    def validate_author_role(cls, value: str) -> str:
+        if value not in COMMENT_AUTHOR_ROLES:
+            raise ValueError(f"author_role must be one of: {', '.join(COMMENT_AUTHOR_ROLES)}")
         return value
 
 
@@ -186,8 +219,11 @@ class IssueReport(BaseModel):
     needs_followup: bool = False
     followup_questions: list[str] = Field(default_factory=list)
     photo_observation: str | None = Field(default=None, max_length=500)
+    status: Status = Status.OPEN
+    comments: list[Comment] = Field(default_factory=list)
     recipients: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @field_validator(
         "property_name",
@@ -211,6 +247,12 @@ class IssueReport(BaseModel):
             stripped = value.strip()
             return stripped or None
         return value
+
+    @model_validator(mode="after")
+    def validate_comment_timestamps(self) -> IssueReport:
+        if not self.updated_at:
+            self.updated_at = self.created_at
+        return self
 
     @field_validator("image_path")
     @classmethod

@@ -21,6 +21,10 @@ This refactor moves the prototype into a modular architecture designed for inter
   - extracted entity buckets + confidence fields
   - follow-up question generation when details are missing
 - Uploaded images are persisted locally and referenced by IssueReport `image_path`
+- Lightweight coordination layer:
+  - issue status lifecycle (`OPEN` -> `RESOLVED`)
+  - internal team comments with author + role + timestamp
+  - designed for visibility and notes, not a full work-order system
 - Basic security hygiene:
   - Never logs API keys
   - Input sanitization for notes and filenames
