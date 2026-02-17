@@ -12,6 +12,7 @@ from propupkeep.core.errors import UserVisibleError
 from propupkeep.core.logging_utils import configure_logging, get_logger
 from propupkeep.core.workflows import IssueWorkflowService
 from propupkeep.models.issue import COMMENT_AUTHOR_ROLES, IssueMetadata, IssueSource, Status
+from propupkeep.services.exporter import export_issues_to_excel_bytes
 from propupkeep.services.router import IssueRouter
 from propupkeep.storage.repository import JsonlIssueRepository
 
@@ -484,6 +485,16 @@ def run_app() -> None:
                         _date_sort_value(issue.created_at),
                     ),
                 )
+
+            export_bytes = export_issues_to_excel_bytes(filtered_issues)
+            st.download_button(
+                label="Download Excel",
+                data=export_bytes,
+                file_name="propupkeep_reports.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                disabled=not filtered_issues,
+                key="download_filtered_issues_excel",
+            )
 
             if not filtered_issues:
                 st.info("No feed items match the selected filters.")
