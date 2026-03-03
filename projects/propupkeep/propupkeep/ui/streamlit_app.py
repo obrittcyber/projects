@@ -12,11 +12,12 @@ from propupkeep.config.settings import Settings, get_settings
 from propupkeep.core.errors import UserVisibleError
 from propupkeep.core.logging_utils import configure_logging, get_logger
 from propupkeep.core.workflows import IssueWorkflowService
-from propupkeep.models.issue import COMMENT_AUTHOR_ROLES, IssueMetadata, IssueSource, Status
+from propupkeep.models.issue import COMMENT_AUTHOR_ROLES, IssueMetadata, IssueReport, IssueSource, Status
 from propupkeep.services.exporter import export_issues_to_excel_bytes
 from propupkeep.services.router import IssueRouter
 from propupkeep.services.transcription import TranscriptionError, transcribe_audio
 from propupkeep.storage.repository import JsonlIssueRepository
+from propupkeep.ui.operational_pulse import render_operational_pulse
 
 try:
     from audio_recorder_streamlit import audio_recorder
@@ -82,6 +83,22 @@ def _build_workflow() -> tuple[Settings, IssueWorkflowService]:
         project_root=settings.project_root,
     )
     return settings, workflow
+
+
+@st.cache_data(show_spinner=False, ttl=20)
+def _load_issue_payloads(_workflow: IssueWorkflowService, limit: int = 100) -> list[dict]:
+    issues = _workflow.list_issues(limit=limit)
+    return [issue.model_dump(mode="json") for issue in issues]
+
+
+def _hydrate_issues(issue_payloads: list[dict]) -> list[IssueReport]:
+    hydrated: list[IssueReport] = []
+    for payload in issue_payloads:
+        try:
+            hydrated.append(IssueReport.model_validate(payload))
+        except Exception:  # noqa: BLE001
+            continue
+    return hydrated
 
 
 def _format_ts(value: str | datetime | None) -> str:
@@ -341,8 +358,8 @@ def run_app() -> None:
             area=None if area == "Unknown" else area,
         )
 
-    quick_snap_tab, quick_voice_tab, unit_notes_tab, community_feed_tab = st.tabs(
-        ["Quick Snap", "Quick Voice", "Unit Notes", "Community Feed"]
+    quick_snap_tab, quick_voice_tab, unit_notes_tab, community_feed_tab, operational_pulse_tab = st.tabs(
+        ["Quick Snap", "Quick Voice", "Unit Notes", "Community Feed", "Operational Pulse"]
     )
 
     with quick_snap_tab:
@@ -408,6 +425,7 @@ def run_app() -> None:
                         st.error("Unexpected error while formatting photo submission. Please retry.")
                     else:
                         st.session_state["last_photo_report"] = report.model_dump(mode="json")
+                        _load_issue_payloads.clear()
                         st.success("Structured issue report generated from quick snap.")
 
         if st.session_state.get("last_photo_report"):
@@ -531,6 +549,7 @@ def run_app() -> None:
                             st.error("Unexpected error while formatting voice note. Please retry.")
                         else:
                             st.session_state["voice_formatted_output"] = report.model_dump(mode="json")
+                            _load_issue_payloads.clear()
                             st.success("Structured work item generated from voice note.")
         with clear_col:
             if st.button("Re-record", key="voice_rerecord"):
@@ -576,6 +595,7 @@ def run_app() -> None:
                     )
                 else:
                     st.session_state["last_note_report"] = report.model_dump(mode="json")
+                    _load_issue_payloads.clear()
                     st.success("Professional issue report generated.")
 
         if st.session_state.get("last_note_report"):
@@ -584,7 +604,8 @@ def run_app() -> None:
     with community_feed_tab:
         st.subheader("Reviewing Logs")
         try:
-            issues = workflow.list_issues(limit=100)
+            issue_payloads = _load_issue_payloads(workflow, limit=100)
+            issues = _hydrate_issues(issue_payloads)
         except UserVisibleError as exc:
             logger.warning("Failed to load activity feed", extra={"context": {"detail": exc.detail}})
             st.error(exc.user_message)
@@ -780,6 +801,7 @@ def run_app() -> None:
                                 logger.exception("Failed to update issue status")
                                 st.error("Could not update issue status right now.")
                             else:
+                                _load_issue_payloads.clear()
                                 st.success("Status updated.")
                                 st.rerun()
 
@@ -823,6 +845,7 @@ def run_app() -> None:
                                         logger.exception("Failed to post issue comment")
                                         st.error("Could not post comment right now.")
                                     else:
+                                        _load_issue_payloads.clear()
                                         st.success("Comment posted.")
                                         st.rerun()
 
@@ -841,3 +864,20 @@ def run_app() -> None:
                                     )
                                 )
                 st.divider()
+
+    with operational_pulse_tab:
+        try:
+            pulse_records = _load_issue_payloads(workflow, limit=500)
+        except UserVisibleError as exc:
+            logger.warning(
+                "Failed to load operational pulse records",
+                extra={"context": {"detail": exc.detail}},
+            )
+            st.error(exc.user_message)
+            pulse_records = []
+        except Exception:  # noqa: BLE001
+            logger.exception("Unexpected operational pulse load failure")
+            st.error("Unexpected error while loading Operational Pulse.")
+            pulse_records = []
+
+        render_operational_pulse(pulse_records)
