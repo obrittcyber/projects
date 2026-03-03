@@ -27,8 +27,10 @@ class IssueCategory(str, Enum):
 
 
 class IssueSource(str, Enum):
-    NOTE = "note"
-    PHOTO = "photo"
+    QUICK_SNAP = "quick_snap"
+    UNIT_NOTES = "unit_notes"
+    QUICK_VOICE = "quick_voice"
+    UNKNOWN = "unknown"
 
 
 class Status(str, Enum):
@@ -199,7 +201,7 @@ class IssueReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     report_id: str = Field(default_factory=lambda: str(uuid4()))
-    source: IssueSource
+    source: IssueSource = IssueSource.UNKNOWN
     property_name: str = Field(..., min_length=1, max_length=120)
     building: str = Field(..., min_length=1, max_length=120)
     unit_number: str = Field(..., min_length=1, max_length=30)
@@ -247,6 +249,28 @@ class IssueReport(BaseModel):
             stripped = value.strip()
             return stripped or None
         return value
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def normalize_source(cls, value: IssueSource | str | None) -> IssueSource:
+        if isinstance(value, IssueSource):
+            return value
+
+        normalized = str(value or "").strip().lower()
+        source_map = {
+            "quick_snap": IssueSource.QUICK_SNAP,
+            "quick snap": IssueSource.QUICK_SNAP,
+            "photo": IssueSource.QUICK_SNAP,
+            "unit_notes": IssueSource.UNIT_NOTES,
+            "unit notes": IssueSource.UNIT_NOTES,
+            "note": IssueSource.UNIT_NOTES,
+            "quick_voice": IssueSource.QUICK_VOICE,
+            "quick voice": IssueSource.QUICK_VOICE,
+            "voice": IssueSource.QUICK_VOICE,
+            "unknown": IssueSource.UNKNOWN,
+            "": IssueSource.UNKNOWN,
+        }
+        return source_map.get(normalized, IssueSource.UNKNOWN)
 
     @model_validator(mode="after")
     def validate_comment_timestamps(self) -> IssueReport:

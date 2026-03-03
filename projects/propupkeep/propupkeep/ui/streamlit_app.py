@@ -134,6 +134,35 @@ def _is_maintenance_routed(recipients: list[str] | None) -> bool:
     return any("maintenance" in str(item).lower() for item in recipients)
 
 
+def _normalize_source_value(value: IssueSource | str | None) -> str:
+    raw = value.value if isinstance(value, IssueSource) else str(value or "")
+    normalized = raw.strip().lower()
+    source_map = {
+        "quick_snap": IssueSource.QUICK_SNAP.value,
+        "quick snap": IssueSource.QUICK_SNAP.value,
+        "photo": IssueSource.QUICK_SNAP.value,
+        "unit_notes": IssueSource.UNIT_NOTES.value,
+        "unit notes": IssueSource.UNIT_NOTES.value,
+        "note": IssueSource.UNIT_NOTES.value,
+        "quick_voice": IssueSource.QUICK_VOICE.value,
+        "quick voice": IssueSource.QUICK_VOICE.value,
+        "voice": IssueSource.QUICK_VOICE.value,
+        "unknown": IssueSource.UNKNOWN.value,
+        "": IssueSource.UNKNOWN.value,
+    }
+    return source_map.get(normalized, IssueSource.UNKNOWN.value)
+
+
+def _source_label(value: IssueSource | str | None) -> str:
+    labels = {
+        IssueSource.QUICK_SNAP.value: "Quick Snap",
+        IssueSource.UNIT_NOTES.value: "Unit Notes",
+        IssueSource.QUICK_VOICE.value: "Quick Voice",
+        IssueSource.UNKNOWN.value: "Unknown",
+    }
+    return labels.get(_normalize_source_value(value), "Unknown")
+
+
 def _status_badge_html(status: str) -> str:
     palette = {
         Status.OPEN.value: ("#1f2937", "#e5e7eb"),
@@ -361,7 +390,7 @@ def run_app() -> None:
                 with st.spinner("Formatting report..."):
                     try:
                         report = workflow.submit_issue(
-                            source=IssueSource.PHOTO,
+                            source=IssueSource.QUICK_SNAP,
                             note_text=quick_note_text,
                             metadata=_build_metadata(),
                             image_bytes=image_bytes,
@@ -487,7 +516,7 @@ def run_app() -> None:
                     with st.spinner("Formatting report..."):
                         try:
                             report = workflow.submit_issue(
-                                source=IssueSource.NOTE,
+                                source=IssueSource.QUICK_VOICE,
                                 note_text=formatted_input,
                                 metadata=_build_metadata(),
                             )
@@ -529,7 +558,7 @@ def run_app() -> None:
             with st.spinner("Formatting report..."):
                 try:
                     report = workflow.submit_issue(
-                        source=IssueSource.NOTE,
+                        source=IssueSource.UNIT_NOTES,
                         note_text=note_text,
                         metadata=_build_metadata(),
                     )
@@ -566,7 +595,10 @@ def run_app() -> None:
             issues = []
 
         if not issues:
-            st.info("No entries yet. Submit from Quick Snap or Unit Notes to populate this feed.")
+            st.info(
+                "No entries yet. Submit from Quick Snap, Quick Voice, or Unit Notes to populate "
+                "this feed."
+            )
         else:
             category_options = sorted(
                 {
@@ -576,6 +608,12 @@ def run_app() -> None:
                 }
             )
             category_filter_options = ["All", "Maintenance View", *category_options]
+            source_filter_options = ["All", "Quick Snap", "Unit Notes", "Quick Voice"]
+            source_filter_to_key = {
+                "Quick Snap": IssueSource.QUICK_SNAP.value,
+                "Unit Notes": IssueSource.UNIT_NOTES.value,
+                "Quick Voice": IssueSource.QUICK_VOICE.value,
+            }
 
             filter_col_1, filter_col_2, filter_col_3 = st.columns([2, 1, 2], gap="small")
             with filter_col_1:
@@ -588,9 +626,9 @@ def run_app() -> None:
             with filter_col_2:
                 source_filter = st.selectbox(
                     "Source",
-                    options=["All", "note", "photo"],
+                    options=source_filter_options,
                     index=0,
-                    key="feed_source_filter",
+                    key="feed_source_filter_v2",
                 )
             with filter_col_3:
                 sort_by = st.selectbox(
@@ -620,11 +658,13 @@ def run_app() -> None:
                 ]
 
             if source_filter != "All":
-                filtered_issues = [
-                    issue
-                    for issue in filtered_issues
-                    if str(issue.source.value).strip().lower() == source_filter
-                ]
+                selected_source = source_filter_to_key.get(source_filter)
+                if selected_source:
+                    filtered_issues = [
+                        issue
+                        for issue in filtered_issues
+                        if _normalize_source_value(getattr(issue, "source", None)) == selected_source
+                    ]
 
             if sort_by == "Date (Newest)":
                 filtered_issues = sorted(
@@ -675,7 +715,7 @@ def run_app() -> None:
                 category = issue.category.value
                 action = issue.recommended_action
                 recipients = issue.recipients
-                source = issue.source.value
+                source = _source_label(getattr(issue, "source", None))
                 timestamp = _format_ts(issue.created_at)
                 updated_timestamp = _format_ts(issue.updated_at)
                 location = (

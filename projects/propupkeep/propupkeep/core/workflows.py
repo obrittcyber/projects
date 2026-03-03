@@ -62,7 +62,7 @@ class IssueWorkflowService:
         has_image = bool(image_bytes)
         if not has_note and not has_image:
             raise UserVisibleError("Please add a note or a photo before submitting.")
-        if source == IssueSource.NOTE and not has_note:
+        if source in {IssueSource.UNIT_NOTES, IssueSource.QUICK_VOICE} and not has_note:
             raise UserVisibleError("Please enter notes before formatting for the team.")
         if has_image and len(image_bytes) > self._max_upload_bytes:
             raise UserVisibleError("The uploaded image is too large. Please upload a smaller file.")

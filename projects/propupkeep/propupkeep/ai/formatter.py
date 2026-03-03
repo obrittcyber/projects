@@ -203,6 +203,6 @@ class OpenAIIssueFormatter:
             f"- image_filename: {image_name}\n"
             f"- image_mime: {mime_block}\n"
             f"- image_bytes_length: {image_size}\n\n"
-            "When source is photo and note_text is empty, rely on filename/metadata only "
+            "When source is quick_snap and note_text is empty, rely on filename/metadata only "
             "and ask follow-up questions as needed."
         )
