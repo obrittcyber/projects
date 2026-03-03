@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 
 import streamlit as st
@@ -10,7 +11,16 @@ from core.errors import UserVisibleError
 from core.logging_utils import configure_logging, get_logger
 from core.workflows import IssueWorkflowService
 from services.router import IssueRouter
+from services.transcription import TranscriptionError, transcribe_audio
 from storage.repository import JsonlIssueRepository
+
+try:
+    from audio_recorder_streamlit import audio_recorder
+
+    AUDIO_RECORDER_AVAILABLE = True
+except Exception:  # noqa: BLE001
+    audio_recorder = None
+    AUDIO_RECORDER_AVAILABLE = False
 
 
 def _render_base_styles() -> None:
@@ -75,6 +85,46 @@ def _format_ts(value: str) -> str:
         return value
 
 
+def _render_structured_report(report: dict, heading: str = "Structured Report") -> None:
+    st.markdown(f"### {heading}")
+    st.markdown(f"**Issue**\n\n{report.get('issue', '')}")
+    st.markdown(f"**Urgency**\n\n{report.get('urgency', '')}")
+    st.markdown(f"**Category**\n\n{report.get('category', '')}")
+    st.markdown(f"**Recommended Action**\n\n{report.get('recommended_action', '')}")
+    recipients = report.get("recipients", [])
+    if recipients:
+        st.markdown(f"**Routing Recipients**\n\n{', '.join(recipients)}")
+
+
+def _ensure_voice_state() -> None:
+    defaults: dict[str, object] = {
+        "voice_audio_bytes": b"",
+        "voice_audio_hash": "",
+        "voice_is_transcribing": False,
+        "voice_transcript": "",
+        "voice_context": "",
+        "voice_formatted_output": None,
+        "voice_audio_mime": "audio/wav",
+        "voice_transcription_error": "",
+        "voice_recorder_nonce": 0,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def _clear_voice_state() -> None:
+    st.session_state["voice_audio_bytes"] = b""
+    st.session_state["voice_audio_hash"] = ""
+    st.session_state["voice_is_transcribing"] = False
+    st.session_state["voice_transcript"] = ""
+    st.session_state["voice_context"] = ""
+    st.session_state["voice_formatted_output"] = None
+    st.session_state["voice_audio_mime"] = "audio/wav"
+    st.session_state["voice_transcription_error"] = ""
+    st.session_state["voice_recorder_nonce"] = int(st.session_state.get("voice_recorder_nonce", 0)) + 1
+
+
 def run_app() -> None:
     st.set_page_config(
         page_title="PropUpkeep Mobile",
@@ -114,8 +164,8 @@ def run_app() -> None:
         st.caption(f"Working on {building}, Unit {unit_number}")
         st.caption(f"Max upload size: {settings.max_upload_mb} MB")
 
-    quick_snap_tab, unit_notes_tab, community_feed_tab = st.tabs(
-        ["Quick Snap", "Unit Notes", "Community Feed"]
+    quick_snap_tab, quick_voice_tab, unit_notes_tab, community_feed_tab = st.tabs(
+        ["Quick Snap", "Quick Voice", "Unit Notes", "Community Feed"]
     )
 
     with quick_snap_tab:
@@ -165,6 +215,136 @@ def run_app() -> None:
                 else:
                     st.success("Snapshot saved and routed to community feed.")
 
+    with quick_voice_tab:
+        _ensure_voice_state()
+        st.subheader("Quick Voice")
+        st.caption("Record a voice note and we'll convert it into a structured work item.")
+
+        recorded_audio_bytes = b""
+        recorded_audio_mime = "audio/wav"
+        recorder_key = f"voice_recorder_{st.session_state['voice_recorder_nonce']}"
+
+        if AUDIO_RECORDER_AVAILABLE and audio_recorder is not None:
+            recorded_audio_bytes = audio_recorder(
+                text="Tap to record",
+                recording_color="#e45757",
+                neutral_color="#6c757d",
+                icon_name="microphone",
+                icon_size="2x",
+                key=recorder_key,
+            )
+            recorded_audio_mime = "audio/wav"
+        else:
+            st.warning("Voice recorder component unavailable; upload an audio clip as fallback.")
+            uploaded_audio = st.file_uploader(
+                "Upload voice clip",
+                type=["wav", "mp3", "m4a", "ogg", "webm"],
+                key=f"{recorder_key}_fallback_upload",
+            )
+            if uploaded_audio:
+                recorded_audio_bytes = uploaded_audio.getvalue()
+                recorded_audio_mime = uploaded_audio.type or "audio/wav"
+
+        if recorded_audio_bytes:
+            st.session_state["voice_audio_bytes"] = recorded_audio_bytes
+            st.session_state["voice_audio_mime"] = recorded_audio_mime
+
+        stored_audio = st.session_state.get("voice_audio_bytes", b"")
+        if stored_audio:
+            st.audio(stored_audio, format=st.session_state.get("voice_audio_mime", "audio/wav"))
+            audio_hash = hashlib.sha256(stored_audio).hexdigest()
+            if (
+                audio_hash != st.session_state.get("voice_audio_hash")
+                and not st.session_state.get("voice_is_transcribing", False)
+            ):
+                st.session_state["voice_is_transcribing"] = True
+                try:
+                    with st.spinner("Transcribing..."):
+                        transcript = transcribe_audio(
+                            audio_bytes=stored_audio,
+                            mime_type=str(st.session_state.get("voice_audio_mime", "audio/wav")),
+                        )
+                except TranscriptionError as exc:
+                    logger.warning(
+                        "Voice transcription failed",
+                        extra={"context": {"detail": str(exc)}},
+                    )
+                    st.session_state["voice_transcript"] = ""
+                    st.session_state["voice_transcription_error"] = (
+                        "Couldn’t transcribe that clip. Please try again."
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Unexpected voice transcription failure")
+                    st.session_state["voice_transcript"] = ""
+                    st.session_state["voice_transcription_error"] = (
+                        "Couldn’t transcribe that clip. Please try again."
+                    )
+                else:
+                    st.session_state["voice_transcript"] = transcript
+                    st.session_state["voice_transcription_error"] = ""
+                finally:
+                    st.session_state["voice_audio_hash"] = audio_hash
+                    st.session_state["voice_is_transcribing"] = False
+                    st.rerun()
+        else:
+            st.info("Record a voice note to begin.")
+
+        if st.session_state.get("voice_transcription_error"):
+            st.warning(st.session_state["voice_transcription_error"])
+
+        st.text_area(
+            "Transcription (editable)",
+            key="voice_transcript",
+            height=160,
+            placeholder="Your transcript will appear here.",
+        )
+        st.text_input(
+            "Context (optional)",
+            key="voice_context",
+            placeholder="Unit #, location, priority, etc.",
+        )
+
+        action_col, clear_col = st.columns([2, 1], gap="small")
+        with action_col:
+            if st.button("Format for Team", key="voice_format_for_team"):
+                transcript_text = str(st.session_state.get("voice_transcript", "")).strip()
+                context_text = str(st.session_state.get("voice_context", "")).strip()
+                if not transcript_text:
+                    st.warning("Please record a voice note before formatting for the team.")
+                else:
+                    formatted_input = (
+                        f"{context_text}\n\n{transcript_text}" if context_text else transcript_text
+                    )
+                    with st.spinner("Formatting report..."):
+                        try:
+                            report = workflow.submit_unit_notes(
+                                building=building,
+                                unit_number=unit_number,
+                                raw_observations=formatted_input,
+                            )
+                        except UserVisibleError as exc:
+                            logger.warning(
+                                "Voice formatting failed",
+                                extra={"context": {"detail": exc.detail}},
+                            )
+                            st.error(exc.user_message)
+                        except Exception:  # noqa: BLE001
+                            logger.exception("Unexpected voice formatting failure")
+                            st.error("Unexpected error while formatting voice note. Please retry.")
+                        else:
+                            st.session_state["voice_formatted_output"] = report.model_dump(mode="json")
+                            st.success("Structured work item generated from voice note.")
+        with clear_col:
+            if st.button("Re-record", key="voice_rerecord"):
+                _clear_voice_state()
+                st.rerun()
+
+        if st.session_state.get("voice_formatted_output"):
+            _render_structured_report(
+                st.session_state["voice_formatted_output"],
+                heading="Structured Work Item",
+            )
+
     with unit_notes_tab:
         st.subheader("Unit Notes")
         raw_observations = st.text_area(
@@ -201,12 +381,7 @@ def run_app() -> None:
                     st.success("Professional issue report generated.")
 
         if st.session_state.get("last_report"):
-            report = st.session_state["last_report"]
-            st.markdown("### Structured Report")
-            st.markdown(f"**Issue**\n\n{report['issue']}")
-            st.markdown(f"**Urgency**\n\n{report['urgency']}")
-            st.markdown(f"**Recommended Action**\n\n{report['recommended_action']}")
-            st.markdown(f"**Routing Recipients**\n\n{', '.join(report['recipients'])}")
+            _render_structured_report(st.session_state["last_report"])
 
     with community_feed_tab:
         st.subheader("Reviewing Logs")
