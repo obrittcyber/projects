@@ -6,7 +6,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
-from core.logging_utils import get_logger
+from propupkeep.core.logging_utils import get_logger
 
 
 class TranscriptionError(Exception):

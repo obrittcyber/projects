@@ -7,11 +7,11 @@ from urllib.request import Request, urlopen
 
 from pydantic import ValidationError
 
-from ai.prompts import JSON_OUTPUT_INSTRUCTIONS, TEAM_BRIEF_SYSTEM_PROMPT
-from config.settings import Settings
-from core.errors import AIFormattingError, ConfigurationError
-from core.logging_utils import get_logger
-from models.issue import AIFormattedIssue
+from propupkeep.ai.prompts import JSON_OUTPUT_INSTRUCTIONS, TEAM_BRIEF_SYSTEM_PROMPT
+from propupkeep.config.settings import Settings
+from propupkeep.core.errors import AIFormattingError, ConfigurationError
+from propupkeep.core.logging_utils import get_logger
+from propupkeep.models.issue import AIFormattedIssue, IssueMetadata, IssueSource
 
 
 class OpenAIIssueFormatter:
@@ -19,17 +19,27 @@ class OpenAIIssueFormatter:
         self._settings = settings
         self._logger = get_logger(__name__)
 
-    def format_issue(self, raw_observations: str, building: str, unit_number: str) -> AIFormattedIssue:
+    def format_issue(
+        self,
+        source: IssueSource,
+        metadata: IssueMetadata,
+        note_text: str | None,
+        image_filename: str | None = None,
+        image_bytes: bytes | None = None,
+        image_mime: str | None = None,
+    ) -> AIFormattedIssue:
         if not self._settings.openai_api_key:
             raise ConfigurationError(
                 "AI formatting is unavailable. Set OPENAI_API_KEY to enable this feature."
             )
 
-        user_prompt = (
-            "Convert leasing consultant notes into a structured issue report.\n\n"
-            f"Building: {building}\n"
-            f"Unit Number: {unit_number}\n"
-            f"Raw Observations: {raw_observations}\n"
+        user_prompt = self._build_user_prompt(
+            source=source,
+            metadata=metadata,
+            note_text=note_text,
+            image_filename=image_filename,
+            image_bytes=image_bytes,
+            image_mime=image_mime,
         )
         messages = [
             {"role": "system", "content": f"{TEAM_BRIEF_SYSTEM_PROMPT}\n\n{JSON_OUTPUT_INSTRUCTIONS}"},
@@ -48,9 +58,12 @@ class OpenAIIssueFormatter:
             repaired_content = self._repair_once(
                 invalid_response=initial_content,
                 validation_error=str(first_error),
-                building=building,
-                unit_number=unit_number,
-                raw_observations=raw_observations,
+                source=source,
+                metadata=metadata,
+                note_text=note_text,
+                image_filename=image_filename,
+                image_bytes=image_bytes,
+                image_mime=image_mime,
             )
             try:
                 return self._parse_and_validate(repaired_content)
@@ -68,17 +81,26 @@ class OpenAIIssueFormatter:
         self,
         invalid_response: str,
         validation_error: str,
-        building: str,
-        unit_number: str,
-        raw_observations: str,
+        source: IssueSource,
+        metadata: IssueMetadata,
+        note_text: str | None,
+        image_filename: str | None,
+        image_bytes: bytes | None,
+        image_mime: str | None,
     ) -> str:
+        submission_context = self._build_user_prompt(
+            source=source,
+            metadata=metadata,
+            note_text=note_text,
+            image_filename=image_filename,
+            image_bytes=image_bytes,
+            image_mime=image_mime,
+        )
         repair_prompt = (
             "Your previous answer failed JSON validation.\n"
             "Repair the output to satisfy the exact schema requirements.\n"
-            "Do not change the core meaning of the report.\n\n"
-            f"Building: {building}\n"
-            f"Unit Number: {unit_number}\n"
-            f"Raw Observations: {raw_observations}\n\n"
+            "Do not change the core meaning or user-stated facts.\n\n"
+            f"{submission_context}\n\n"
             f"Invalid Output:\n{invalid_response}\n\n"
             f"Validation Error:\n{validation_error}\n\n"
             f"{JSON_OUTPUT_INSTRUCTIONS}"
@@ -151,3 +173,36 @@ class OpenAIIssueFormatter:
                 "AI service returned an unexpected response format.",
                 detail=str(exc),
             ) from exc
+
+    def _build_user_prompt(
+        self,
+        source: IssueSource,
+        metadata: IssueMetadata,
+        note_text: str | None,
+        image_filename: str | None,
+        image_bytes: bytes | None,
+        image_mime: str | None,
+    ) -> str:
+        note_block = note_text if note_text else "[none provided]"
+        image_name = image_filename if image_filename else "[none provided]"
+        mime_block = image_mime if image_mime else "Unknown"
+        image_size = len(image_bytes) if image_bytes else 0
+        area = metadata.area if metadata.area else "Unknown"
+
+        return (
+            "Create a structured Issue Report for property operations.\n"
+            "Preserve factual entities exactly as reported.\n"
+            "If facts are missing, use Unknown and set needs_followup=true with questions.\n\n"
+            "Submission Facts (must preserve):\n"
+            f"- source: {source.value}\n"
+            f"- property_name: {metadata.property_name}\n"
+            f"- building: {metadata.building}\n"
+            f"- unit_number: {metadata.unit_number}\n"
+            f"- area: {area}\n"
+            f"- note_text: {note_block}\n"
+            f"- image_filename: {image_name}\n"
+            f"- image_mime: {mime_block}\n"
+            f"- image_bytes_length: {image_size}\n\n"
+            "When source is photo and note_text is empty, rely on filename/metadata only "
+            "and ask follow-up questions as needed."
+        )

@@ -8,10 +8,33 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ENV_FILE = PROJECT_ROOT / ".env"
+
+# Load project-local .env so each project can keep isolated config.
+load_dotenv(dotenv_path=PROJECT_ENV_FILE, override=False)
+
+
+def _resolve_data_file() -> Path:
+    return _resolve_project_path("DATA_FILE", "propupkeep/data/activity.jsonl")
+
+
+def _resolve_uploads_dir() -> Path:
+    return _resolve_project_path("UPLOADS_DIR", "propupkeep/data/uploads")
+
+
+def _resolve_project_path(env_key: str, default_relative: str) -> Path:
+    env_value = os.getenv(env_key)
+    if env_value:
+        candidate = Path(env_value)
+        if candidate.is_absolute():
+            return candidate.resolve()
+        return (PROJECT_ROOT / candidate).resolve()
+    return (PROJECT_ROOT / default_relative).resolve()
 
 
 class Settings(BaseModel):
+    project_root: Path = Field(default=PROJECT_ROOT)
     app_name: str = "PropUpkeep MVP"
     app_env: str = Field(default_factory=lambda: os.getenv("APP_ENV", "development"))
     log_level: str = Field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
@@ -31,7 +54,8 @@ class Settings(BaseModel):
 
     max_upload_mb: int = Field(default_factory=lambda: int(os.getenv("MAX_UPLOAD_MB", "5")))
     max_input_chars: int = Field(default_factory=lambda: int(os.getenv("MAX_INPUT_CHARS", "3000")))
-    data_file: Path = Field(default_factory=lambda: Path(os.getenv("DATA_FILE", "data/activity.jsonl")))
+    data_file: Path = Field(default_factory=_resolve_data_file)
+    uploads_dir: Path = Field(default_factory=_resolve_uploads_dir)
 
     @property
     def max_upload_bytes(self) -> int:
